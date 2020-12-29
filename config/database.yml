@@ -23,7 +23,7 @@ default: &default
 
 development:
   <<: *default
-  database: fago_development
+  database: fago_dev
 
   # The specified database role being used to connect to postgres.
   # To create additional roles in postgres see `$ createuser --help`.
@@ -81,6 +81,6 @@ test:
 #
 production:
   <<: *default
-  database: fago_production
+  database: fago_live
   username: fago
-  password: <%= ENV['FAGO_DATABASE_PASSWORD'] %>
+  password: <%= ENV['FAGO_DB_PASSWORD'] %>
