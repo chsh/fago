@@ -1,6 +1,6 @@
 require 'digest/md5'
 
-class SeqenceBuilder
+class SequenceBuilder
   def initialize(in_dir, out_dir)
     @in_dir = in_dir
     @out_dir = out_dir
@@ -8,6 +8,9 @@ class SeqenceBuilder
   end
 
   attr_reader :in_dir, :out_dir, :now
+
+  SEQ_EXTS = %w(jpg jpeg png dng ori orf)
+  SINGLE_EXTS = %w(mov mp4)
 
   def run
     verify_dir(in_dir) || raise("in_dir=#{in_dir} not present.")
@@ -25,8 +28,8 @@ class SeqenceBuilder
     clip_seq = 1
     ext_to_files.each do |ext, list|
       log "processing :#{ext}"
-      sorted_list = list.sort_by(&:last_modified_at)
-      groups = groups_by_span(sorted_list)
+      sorted_list = sort_by_time_and_name(list)
+      groups = groups_by_span(sorted_list, ext: ext)
       log "groups.size=#{groups.size}"
       groups.each_with_index do |group, index|
         log "ext:#{ext}, group=#{index}, size=#{group.size}, first=#{group[0].file}"
@@ -38,6 +41,13 @@ class SeqenceBuilder
   end
 
   private
+
+  def sort_by_time_and_name(list)
+    list.sort { |a,b|
+      [a.last_modified_at, a.file] <=> [b.last_modified_at, b.file]
+    }
+  end
+
   def verify_dir(dir)
     Dir.exist?(dir)
   end
@@ -47,7 +57,7 @@ class SeqenceBuilder
   end
 
   def filter_images(list)
-    list.select { |hash| File.extname(hash.file).gsub(/\A\./, '').downcase.in? %w(jpg jpeg png dng ori orf) }
+    list.select { |hash| File.extname(hash.file).gsub(/\A\./, '').downcase.in?(SEQ_EXTS+SINGLE_EXTS) }
   end
 
   def files_by_ext(list)
@@ -72,7 +82,15 @@ class SeqenceBuilder
     end
   end
 
-  def groups_by_span(list)
+  def groups_by_span(list, ext:)
+    if ext.in? SEQ_EXTS
+      groups_by_span_for_seq(list)
+    else
+      groups_by_span_for_single(list)
+    end
+  end
+
+  def groups_by_span_for_seq(list)
     group_index = 0
     groups = []
     marker = nil
@@ -96,6 +114,10 @@ class SeqenceBuilder
     groups
   end
 
+  def groups_by_span_for_single(list)
+    list.map { |hash| [hash] }
+  end
+
   def log(text, cond = true)
     puts "#{Time.zone.now}: #{text}" if cond
   end
@@ -106,15 +128,20 @@ class SeqenceBuilder
     elsif index == 0
       :new
     elsif prev_marker == :new
+      puts "list.size=#{list.size}, index=#{index}"
       prev_data = list[index-1]
       cur_data = list[index]
       next_data = list[index+1]
-      span1 = cur_data.last_modified_at - prev_data.last_modified_at
-      span2 = next_data.last_modified_at - cur_data.last_modified_at
-      if (span2 - span1).abs <= 2.0
-        :cont
-      else
+      if next_data.nil?
         :new
+      else
+        span1 = cur_data.last_modified_at - prev_data.last_modified_at
+        span2 = next_data.last_modified_at - cur_data.last_modified_at
+        if (span2 - span1).abs <= 2.0
+          :cont
+        else
+          :new
+        end
       end
     elsif prev_marker == :cont
       prev_prev_data = list[index-2]
@@ -143,7 +170,7 @@ class SeqenceBuilder
 
   def target_dir
     @target_dir ||= begin
-      now_s = now.strftime('%Y-%m-%d--')
+      now_s = now.strftime('%Y-%m-%d.')
       dirs = Dir.glob("#{out_dir}/#{now_s}*/")
       if dirs.size == 0
         last_seq = 1
@@ -156,11 +183,17 @@ class SeqenceBuilder
   end
 
   def process_clip_seq(ext, list, clip_seq)
-    to_dir = "#{target_dir}/c#{clip_seq}-seq"
-    FileUtils.mkdir_p(to_dir) unless Dir.exist?(to_dir)
-    list.each_with_index do |hash, index|
-      fn = sprintf("seq%06d.#{ext}", index + 1)
-      FileUtils.cp(hash.file, "#{to_dir}/#{fn}")
+    FileUtils.mkdir_p(target_dir) unless Dir.exist?(target_dir)
+    if ext.in?(SEQ_EXTS) && list.size > 1
+      to_dir = "#{target_dir}/c#{clip_seq}-seq-#{list.size}"
+      FileUtils.mkdir(to_dir) unless Dir.exist?(to_dir)
+      list.each_with_index do |hash, index|
+        fn = sprintf("seq%06d.#{ext}", index + 1)
+        FileUtils.cp(hash.file, "#{to_dir}/#{fn}")
+      end
+    else # SINGLE_EXTS or SEQ_EXTS && size == 1
+      to_file = "#{target_dir}/c#{clip_seq}.#{ext}"
+      FileUtils.cp(list[0].file, to_file)
     end
     # cmd = "ffmpeg -r 60 -f image2 -i #{to_dir}/seq%06d.#{ext} -vcodec prores -qp 0 #{target_dir}/c#{clip_seq}.mov"
     # log cmd
