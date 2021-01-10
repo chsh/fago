@@ -1,13 +1,15 @@
 require 'digest/md5'
 
 class SequenceBuilder
-  def initialize(in_dir, out_dir)
+  def initialize(in_dir, out_dir, one_seq: false, dry_run: false)
     @in_dir = in_dir
     @out_dir = out_dir
     @now = Time.zone.now
+    @one_seq = one_seq ? true : false
+    @dry_run = dry_run ? true : false
   end
 
-  attr_reader :in_dir, :out_dir, :now
+  attr_reader :in_dir, :out_dir, :now, :one_seq, :dry_run
 
   SEQ_EXTS = %w(jpg jpeg png dng ori orf)
   SINGLE_EXTS = %w(mov mp4)
@@ -32,8 +34,8 @@ class SequenceBuilder
       groups = groups_by_span(sorted_list, ext: ext)
       log "groups.size=#{groups.size}"
       groups.each_with_index do |group, index|
-        log "ext:#{ext}, group=#{index}, size=#{group.size}, first=#{group[0].file}"
-        process_clip_seq(ext, group, clip_seq)
+        log "#{dry_run ? 'DRY RUN ' : ''}ext:#{ext}, group=#{index}, size=#{group.size}, first=#{group[0].file}"
+        process_clip_seq(ext, group, clip_seq) unless dry_run
         clip_seq += 1
       end
     end
@@ -84,10 +86,20 @@ class SequenceBuilder
 
   def groups_by_span(list, ext:)
     if ext.in? SEQ_EXTS
-      groups_by_span_for_seq(list)
+      if one_seq
+        groups_by_span_for_one(list)
+      else
+        groups_by_span_for_seq(list)
+      end
     else
       groups_by_span_for_single(list)
     end
+  end
+
+  def groups_by_span_for_one(list)
+    groups = []
+    groups[0] = list
+    groups
   end
 
   def groups_by_span_for_seq(list)
