@@ -1,31 +1,29 @@
 require 'digest/md5'
 
 class SequenceBuilder
-  def initialize(in_dir, out_dir, one_seq: false, dry_run: false)
+  def initialize(in_dir, out_dir)
     @in_dir = in_dir
     @out_dir = out_dir
     @now = Time.zone.now
-    @one_seq = one_seq ? true : false
-    @dry_run = dry_run ? true : false
   end
 
-  attr_reader :in_dir, :out_dir, :now, :one_seq, :dry_run
+  attr_reader :in_dir, :out_dir, :now, :one_seq, :dry_run, :ext, :seq_span
 
   SEQ_EXTS = %w(jpg jpeg png dng ori orf)
-  SINGLE_EXTS = %w(mov mp4)
+  SINGLE_EXTS = %w(mov mp4 lrv)
 
-  def run
+  def export(one_seq: false, dry_run: false, ext: nil, seq_span: nil)
+    @one_seq = one_seq ? true : false
+    @dry_run = dry_run ? true : false
+    @ext = ext.present? ? [ext].flatten.map(&:downcase) : SEQ_EXTS+SINGLE_EXTS
+    @seq_span = seq_span
+
     verify_dir(in_dir) || raise("in_dir=#{in_dir} not present.")
     verify_dir(out_dir) || create_dir(out_dir) and "out_dir=#{out_dir} created."
-    log "Grobbing files from=#{in_dir}"
-    files = glob_files(in_dir)
-    log "Globbed: num=#{files.size}"
-    log "Checking stats..."
-    files = files_with_stat(files)
-    log "Filtering images..."
-    files = filter_images(files)
-    log "Ext grouping..."
-    ext_to_files = files_by_ext(files)
+
+    targets = filter_images(files)
+    ext_to_files = files_by_ext(targets)
+
     log "Start processing."
     clip_seq = 1
     ext_to_files.each do |ext, list|
@@ -42,7 +40,18 @@ class SequenceBuilder
     log "finished"
   end
 
+  def prepare
+    export(dry_run: true)
+  end
+
   private
+
+  def current_seq_span
+    seq_span || 5.0
+  end
+  def files
+    @files ||= files_with_stat(glob_files(in_dir))
+  end
 
   def sort_by_time_and_name(list)
     list.sort { |a,b|
@@ -55,14 +64,19 @@ class SequenceBuilder
   end
 
   def glob_files(dir)
-    Dir.glob("#{dir}/**/*")
+    log "Grobbing files from=#{dir}"
+    files = Dir.glob("#{dir}/**/*")
+    log "Globbed: num=#{files.size}"
+    files
   end
 
   def filter_images(list)
-    list.select { |hash| File.extname(hash.file).gsub(/\A\./, '').downcase.in?(SEQ_EXTS+SINGLE_EXTS) }
+    log "Filtering images..."
+    list.select { |hash| File.extname(hash.file).gsub(/\A\./, '').downcase.in?(ext) }
   end
 
   def files_by_ext(list)
+    log "Ext grouping..."
     r = {}
     list.each do |hash|
       ext = File.extname(hash.file).gsub(/\A\./, '').downcase
@@ -77,6 +91,7 @@ class SequenceBuilder
   end
 
   def files_with_stat(files)
+    log "Checking stats..."
     total = files.size
     files.map.with_index do |file, index|
       log "#{Time.zone.now}: #{index}/#{total}", index > 0 && index % 500 == 0
@@ -149,7 +164,7 @@ class SequenceBuilder
       else
         span1 = cur_data.last_modified_at - prev_data.last_modified_at
         span2 = next_data.last_modified_at - cur_data.last_modified_at
-        if (span2 - span1).abs <= 2.0
+        if (span2 - span1).abs <= current_seq_span
           :cont
         else
           :new
@@ -161,22 +176,13 @@ class SequenceBuilder
       cur_data = list[index]
       span1 = prev_data.last_modified_at - prev_prev_data.last_modified_at
       span2 = cur_data.last_modified_at - prev_data.last_modified_at
-      if (span2 - span1).abs <= 2.0
+      if (span2 - span1).abs <= current_seq_span
         :cont
       else
         :new
       end
     else
       raise "Unexpected state. index=#{index}, prev_marker=#{prev_marker}"
-    end
-  end
-
-  def span_within(span_a, span_b)
-    avg = (span_a + span_b) / 2.0
-    if (span_a - avg).abs <= 1.0 && (span_b - avg).abs <= 1.0
-      avg
-    else
-      nil
     end
   end
 
