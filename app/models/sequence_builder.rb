@@ -7,14 +7,16 @@ class SequenceBuilder
     @now = Time.zone.now
   end
 
-  attr_reader :in_dir, :out_dir, :now, :one_seq, :dry_run, :ext, :seq_span
+  attr_reader :in_dir, :out_dir, :now, :one_seq, :ext, :seq_span, :skip_first, :skip_last
 
   SEQ_EXTS = %w(jpg jpeg png dng ori orf)
   SINGLE_EXTS = %w(mov mp4 lrv)
 
-  def export(one_seq: false, dry_run: false, ext: nil, seq_span: nil)
+  def export(one_seq: false, dry_run: false, ext: nil, seq_span: nil, skip_first: false, skip_last: false)
     @one_seq = one_seq ? true : false
-    @dry_run = dry_run ? true : false
+    dry_run = dry_run ? true : false
+    @skip_first = skip_first ? true : false
+    @skip_last = skip_last ? true : false
     @ext = ext.present? ? [ext].flatten.map(&:downcase) : SEQ_EXTS+SINGLE_EXTS
     @seq_span = seq_span
 
@@ -38,10 +40,15 @@ class SequenceBuilder
       end
     end
     log "finished"
+    log "Saved to #{target_dir}"
   end
 
   def prepare
     export(dry_run: true)
+  end
+
+  def dry_run(options = {})
+    export(options.merge(dry_run: true))
   end
 
   private
@@ -188,7 +195,7 @@ class SequenceBuilder
 
   def target_dir
     @target_dir ||= begin
-      now_s = now.strftime('%Y-%m-%d.')
+      now_s = now.strftime('%Y%m%d-')
       dirs = Dir.glob("#{out_dir}/#{now_s}*/")
       if dirs.size == 0
         last_seq = 1
@@ -205,9 +212,12 @@ class SequenceBuilder
     if ext.in?(SEQ_EXTS) && list.size > 1
       to_dir = "#{target_dir}/c#{clip_seq}-seq-#{list.size}"
       FileUtils.mkdir(to_dir) unless Dir.exist?(to_dir)
+      list_size = list.size
       list.each_with_index do |hash, index|
         fn = sprintf("seq%06d.#{ext}", index + 1)
-        FileUtils.cp(hash.file, "#{to_dir}/#{fn}")
+        if execute_process_clip_seq?(index, list_size)
+          FileUtils.cp(hash.file, "#{to_dir}/#{fn}")
+        end
       end
     else # SINGLE_EXTS or SEQ_EXTS && size == 1
       to_file = "#{target_dir}/c#{clip_seq}.#{ext}"
@@ -216,6 +226,12 @@ class SequenceBuilder
     # cmd = "ffmpeg -r 60 -f image2 -i #{to_dir}/seq%06d.#{ext} -vcodec prores -qp 0 #{target_dir}/c#{clip_seq}.mov"
     # log cmd
     # `#{cmd}`
+  end
+
+  def execute_process_clip_seq?(index, list_size)
+    return false if index == 0 && skip_first
+    return false if index == list_size-1 && skip_last
+    true
   end
 
   class StatHash
