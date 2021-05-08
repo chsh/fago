@@ -7,8 +7,14 @@ class ConcatGo
   def run(rm_thms: true, rm_lrvs: true, to: nil)
     if to.present?
       save_dir = target_dir(to)
+      FileUtils.mkdir_p save_dir
     else
       save_dir = nil
+    end
+    make_groups(Dir.glob("#{folder}/*.MP4")).each do |gn, files|
+      list_file = "#{folder}/list-#{gn}.txt"
+      File.open(list_file, 'w') do |f|
+        files.each do |path|
           f.puts "file '#{path}'"
         end
       end
@@ -22,7 +28,7 @@ class ConcatGo
         FileUtils.cp "#{folder}/#{base_name}", "#{save_dir}/#{base_name}"
       end
     end
-    if rm_thms
+  if rm_thms
       Dir.glob("#{folder}/*.THM").map do |file|
         File.delete file
       end
